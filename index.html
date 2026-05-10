@@ -131,6 +131,24 @@ select{appearance:none;-webkit-appearance:none;background-image:url("data:image/
 
 <div id="toast"></div>
 
+<!-- ========== SETUP API URL (first time) ========== -->
+<section id="screen-setup" class="screen">
+  <div style="margin-top:40px"></div>
+  <div>
+    <div class="xl">Setup</div>
+    <div class="dim" style="margin-top:8px">Masukkan URL Cloudflare Worker anda</div>
+  </div>
+  <div style="background:#1c1c1c;border:1px solid #fbbf24;border-radius:10px;padding:14px;font-size:13px;color:#fbbf24;line-height:1.6">
+    Buka Cloudflare Dashboard → Workers & Pages → klik worker anda → copy URL yang ditampilkan (format: <strong>https://xxx.workers.dev</strong>)
+  </div>
+  <div class="field">
+    <label>Cloudflare Worker URL</label>
+    <input id="setup-url" type="text" placeholder="https://stocktake-api.xxx.workers.dev" autocomplete="off" style="font-size:13px">
+  </div>
+  <button id="btn-save-setup" class="btn btn-p">Test & Simpan</button>
+  <div class="spacer"></div>
+</section>
+
 <!-- ========== LOGIN ========== -->
 <section id="screen-login" class="screen">
   <div style="margin-top:40px"></div>
@@ -272,6 +290,11 @@ select{appearance:none;-webkit-appearance:none;background-image:url("data:image/
    Tiada call terus ke Apps Script — CORS diselesaikan sepenuhnya
 ================================================================= */
 
+// ─── CONFIG ───────────────────────────────────────────────────────
+// Ganti URL ini dengan URL Cloudflare Worker anda
+// Format: https://stocktake-api.YOUR-SUBDOMAIN.workers.dev
+const API_BASE = localStorage.getItem('stk_api_base') || '';
+
 // ─── STATE ────────────────────────────────────────────────────────
 const S = {
   staff: null, kedai: null, sessionId: null, periode: null,
@@ -346,7 +369,8 @@ function loadR()  { try { S.recent = JSON.parse(localStorage.getItem(LS.R) || '[
 
 async function api(action, data) {
   const isGet = !data;
-  const url   = isGet ? `/api?action=${encodeURIComponent(action)}` : '/api';
+  const base  = window._apiBase || localStorage.getItem('stk_api_base') || '';
+  const url   = isGet ? `${base}?action=${encodeURIComponent(action)}` : base;
   const opts  = isGet
     ? { method: 'GET' }
     : { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action, ...data }) };
@@ -775,6 +799,36 @@ window.addEventListener('load', () => {
   loadQ(); loadR();
   if (S.queue.length) setTimeout(() => toast(`${S.queue.length} scan pending sync`, 'ok'), 600);
 
+  // Setup API URL
+  $('#btn-save-setup')?.addEventListener('click', async () => {
+    const urlInput = $('#setup-url').value.trim();
+    if (!urlInput) { toast('Masukkan URL Worker', 'err'); return; }
+    if (!urlInput.startsWith('https://')) { toast('URL harus diawali https://', 'err'); return; }
+
+    const btn = $('#btn-save-setup');
+    btn.disabled = true; btn.innerHTML = '<span class="spin"></span>';
+
+    try {
+      // Test koneksi ke worker
+      const testUrl = `${urlInput}?action=ping`;
+      const res = await fetch(testUrl);
+      const data = await res.json();
+      if (data.ok) {
+        localStorage.setItem('stk_api_base', urlInput);
+        // Update API_BASE di runtime
+        window._apiBase = urlInput;
+        toast('Sambungan berhasil!', 'ok');
+        setTimeout(() => { showScreen('login'); $('#pin-input')?.focus(); }, 800);
+      } else {
+        toast('Worker error: ' + (data.msg || 'coba lagi'), 'err');
+      }
+    } catch(e) {
+      toast('Tidak bisa sambung: ' + e.message, 'err');
+    } finally {
+      btn.disabled = false; btn.textContent = 'Test & Simpan';
+    }
+  });
+
   // Login
   $('#btn-login').addEventListener('click', doLogin);
   $('#pin-input').addEventListener('keydown', e => { if (e.key === 'Enter') doLogin(); });
@@ -809,8 +863,17 @@ window.addEventListener('load', () => {
   window.addEventListener('online',  () => { toast('Online — sync...', 'ok'); flush(); });
   window.addEventListener('offline', () => toast('Offline — scan disimpan local', 'err'));
 
-  showScreen('login');
-  setTimeout(() => $('#pin-input')?.focus(), 100);
+  // Check apakah API URL sudah diset
+  const savedApi = localStorage.getItem('stk_api_base');
+  if (savedApi) {
+    // API URL sudah ada, langsung ke login
+    showScreen('login');
+    setTimeout(() => $('#pin-input')?.focus(), 100);
+  } else {
+    // Belum ada, perlu setup dulu
+    showScreen('setup');
+    setTimeout(() => $('#setup-url')?.focus(), 100);
+  }
 });
 
 window.addEventListener('beforeunload', e => {
